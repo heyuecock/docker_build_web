@@ -1,0 +1,110 @@
+name: 构建并推送 Docker Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      config_content:
+        description: 'Content of config.env'
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      # 检出代码
+      - name: 检出代码
+        uses: actions/checkout@v2
+
+      # 保存 config.env 内容到 config_history/<run_id>.env
+      - name: 保存 config.env 内容
+        run: |
+          mkdir -p config_history
+          echo "${{ github.event.inputs.config_content }}" > config_history/${{ github.run_id }}.env
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'actions@github.com'
+          git add config_history/${{ github.run_id }}.env
+          git commit -m "Save config.env for run ${{ github.run_id }}"
+          # 使用 PAT 进行身份验证
+          git remote set-url origin https://${{ secrets.PAT }}@github.com/${{ github.repository }}.git
+          # 拉取最新更改（避免冲突）
+          git pull origin main
+          git push origin main
+
+      # 加载 config.env 配置
+      - name: 加载 config.env 配置
+        run: |
+          set -o allexport
+          source config_history/${{ github.run_id }}.env
+          set +o allexport
+          # 将所有环境变量导出到 GitHub Actions 专用的环境文件
+          for var in $(cat config_history/${{ github.run_id }}.env | grep -v '^#' | sed 's/=.*//'); do
+            echo "$var=${!var}" >> $GITHUB_ENV
+          done
+
+      # 输出变量值
+      - name: 输出变量值
+        run: |
+          echo "GITHUB_REPO: $GITHUB_REPO"
+          echo "BRANCH: $BRANCH"
+          echo "ARCHITECTURES: $ARCHITECTURES"
+          echo "DOCKER_TAG: $DOCKER_TAG"
+          echo "DOCKERFILE_AMD64: $DOCKERFILE_AMD64"
+          echo "DOCKERFILE_ARM64: $DOCKERFILE_ARM64"
+
+      # 拉取指定分支的 GitHub 仓库源码
+      - name: 拉取指定分支的代码
+        run: |
+          echo "Cloning repository from $GITHUB_REPO branch $BRANCH"
+          git clone --single-branch --branch $BRANCH $GITHUB_REPO repo
+          cd repo
+
+      # 设置 Docker Buildx
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      # 登录 Docker Hub
+      - name: 登录 Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ env.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # 为多个架构构建并推送 Docker 镜像
+      - name: 为多个架构构建并推送 Docker 镜像
+        working-directory: ./repo
+        run: |
+          echo "Building for architectures: $ARCHITECTURES"
+          echo "Using Docker tag: $DOCKER_TAG"
+
+          TAGS=""
+          for arch in $(echo $ARCHITECTURES | tr ',' ' '); do
+            case $arch in
+              linux/amd64)
+                DOCKERFILE_PATH=$DOCKERFILE_AMD64
+                ARCH_SUFFIX="amd64"
+                ;;
+              linux/arm64)
+                DOCKERFILE_PATH=$DOCKERFILE_ARM64
+                ARCH_SUFFIX="arm64"
+                ;;
+              *)
+                echo "Unsupported architecture: $arch"
+                exit 1
+                ;;
+            esac
+
+            echo "Building for $arch using Dockerfile: $DOCKERFILE_PATH"
+
+            # 构建并推送带有架构特定标签的镜像
+            docker buildx build --platform "$arch" -t "$DOCKER_USERNAME/$DOCKER_REPO_NAME:$DOCKER_TAG-$ARCH_SUFFIX" --file $DOCKERFILE_PATH --push .
+
+            # 收集所有架构的镜像标签
+            TAGS="$TAGS $DOCKER_USERNAME/$DOCKER_REPO_NAME:$DOCKER_TAG-$ARCH_SUFFIX"
+          done
+
+          # 创建多架构镜像清单
+          docker buildx imagetools create -t "$DOCKER_USERNAME/$DOCKER_REPO_NAME:$DOCKER_TAG" $TAGS
+        env:
+          DOCKER_TAG: ${{ env.DOCKER_TAG }}
+          DOCKERFILE_AMD64: ${{ env.DOCKERFILE_AMD64 }}
+          DOCKERFILE_ARM64: ${{ env.DOCKERFILE_ARM64 }}
