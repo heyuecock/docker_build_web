@@ -54,8 +54,12 @@ jobs:
       # 拉取指定分支的 GitHub 仓库源码
       - name: 拉取指定分支的代码
         run: |
-          echo "Cloning repository from $GITHUB_REPO branch $BRANCH"
-          git clone --single-branch --branch $BRANCH $GITHUB_REPO repo
+          echo "Original GITHUB_REPO: $GITHUB_REPO"
+          # 提取仓库路径（移除 https://github.com/ 和 .git 部分）
+          REPO_PATH=$(echo "$GITHUB_REPO" | sed 's|https://github.com/||' | sed 's/\.git$//')
+          echo "Processed REPO_PATH: $REPO_PATH"
+          echo "Cloning repository from https://github.com/$REPO_PATH branch $BRANCH"
+          git clone --single-branch --branch "$BRANCH" "https://${{ secrets.PAT }}@github.com/$REPO_PATH.git" repo
           cd repo
 
       # 设置 Docker Buildx
