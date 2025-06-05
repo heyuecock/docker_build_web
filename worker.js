@@ -57,10 +57,10 @@ async function handleRequest(request) {
 
       const configContent =
         `GITHUB_REPO=${getConfigValue('githubRepo')}\n` +
+        `BRANCH=${getConfigValue('branch')}\n` +
         `DOCKER_USERNAME=${getConfigValue('dockerUsername')}\n` +
         `DOCKER_REPO_NAME=${getConfigValue('dockerRepoName')}\n` +
         `DOCKER_TAG=${getConfigValue('dockerTag')}\n` +
-        `BRANCH=${getConfigValue('branch')}\n` +
         `ARCHITECTURES=${architectures.join(',')}\n` +
         `DOCKERFILE_AMD64=${getConfigValue('dockerfileAmd64')}\n` +
         `DOCKERFILE_ARM64=${getConfigValue('dockerfileArm64')}`;
